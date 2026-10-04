@@ -20,7 +20,8 @@ public class PdfTextExtractor implements TextExtractor {
      */
     @Override
     public String extract(String rawText) {
-        return "";
+        throw new UnsupportedOperationException(
+                "PDF extraction requires byte[] content; use extract(byte[])");
     }
 
     /**
@@ -32,7 +33,7 @@ public class PdfTextExtractor implements TextExtractor {
      */
     public List<PdfParagraph> extractWithPages(byte[] pdfContent) {
         if (pdfContent == null || pdfContent.length == 0) {
-            return List.of();
+            throw new IllegalArgumentException("PDF content cannot be null or empty");
         }
 
         try (PDDocument document = Loader.loadPDF(pdfContent)) {
@@ -59,7 +60,8 @@ public class PdfTextExtractor implements TextExtractor {
 
             return paragraphs;
         } catch (Exception e) {
-            return List.of();
+            throw new IllegalArgumentException(
+                    "Failed to extract text from PDF", e);
         }
     }
 

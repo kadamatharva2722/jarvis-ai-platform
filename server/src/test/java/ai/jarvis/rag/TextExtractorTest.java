@@ -12,6 +12,7 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import java.io.ByteArrayOutputStream;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("TextExtractor Tests")
 class TextExtractorTest {
@@ -131,10 +132,11 @@ class TextExtractorTest {
     }
 
     @Test
-    @DisplayName("PDF: handles invalid input gracefully")
+    @DisplayName("PDF: rejects invalid input gracefully")
     void pdfShouldHandleInvalidInput() {
-        assertThat(pdfExtractor.extract(new byte[]{1, 2, 3}))
-                .isEqualTo("");
+        assertThatThrownBy(() -> pdfExtractor.extract(new byte[]{1, 2, 3}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Failed to extract text from PDF");
     }
 
     @Test
@@ -162,6 +164,45 @@ class TextExtractorTest {
         String result = pdfExtractor.extract(output.toByteArray());
 
         assertThat(result).contains("Hello PDF");
+    }
+    @Test
+    @DisplayName("PDF: extracts two paragraphs from the same page")
+    void pdfShouldExtractTwoParagraphsFromSamePage() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+
+            try (PDPageContentStream contentStream =
+                         new PDPageContentStream(document, document.getPage(0))) {
+
+                contentStream.beginText();
+                contentStream.setFont(
+                        new PDType1Font(Standard14Fonts.FontName.HELVETICA),
+                        12);
+
+                contentStream.newLineAtOffset(50, 700);
+                contentStream.showText("First paragraph of the document.");
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText("Second paragraph of the document.");
+
+                contentStream.endText();
+            }
+
+            document.save(output);
+        }
+
+        var paragraphs = pdfExtractor.extractWithPages(output.toByteArray());
+
+        assertThat(paragraphs).hasSize(2);
+        assertThat(paragraphs.get(0).text())
+                .contains("First paragraph");
+        assertThat(paragraphs.get(1).text())
+                .contains("Second paragraph");
+        assertThat(paragraphs.get(0).pageNumber())
+                .isEqualTo(1);
+        assertThat(paragraphs.get(1).pageNumber())
+                .isEqualTo(1);
     }
     @Test
     @DisplayName("PDF: supports PDF type")

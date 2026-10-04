@@ -22,7 +22,7 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.relational.core.query.Update;
 import reactor.core.publisher.Mono;
-
+import org.springframework.transaction.reactive.TransactionalOperator;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -38,6 +38,8 @@ class DocumentProcessingServiceTest {
     private DocumentChunkRepository chunkRepository;
     @Mock
     private R2dbcEntityTemplate r2dbcEntityTemplate;
+    @Mock
+    private TransactionalOperator transactionalOperator;
 
     private DocumentProcessingService service;
 
@@ -51,7 +53,8 @@ class DocumentProcessingServiceTest {
                         new PlainTextExtractor(),
                         new MarkdownExtractor(),
                         new PdfTextExtractor()
-                )
+                ),
+                transactionalOperator
         );
     }
 
@@ -224,4 +227,28 @@ class DocumentProcessingServiceTest {
         assertThat(chunks.get(0).pageNumber())
                 .isEqualTo(1);
     }
+    @Test
+    @DisplayName("splitPdfIntoChunks() does not mix page numbers in one chunk")
+    void shouldKeepPdfChunksWithinPageBoundaries() {
+        List<PdfTextExtractor.PdfParagraph> paragraphs = List.of(
+                new PdfTextExtractor.PdfParagraph(
+                        "Page one has a lot of content that should stay together " +
+                                "without being mixed with the next page content.",
+                        1),
+                new PdfTextExtractor.PdfParagraph(
+                        "Page two also has enough content to create its own chunk " +
+                                "and should keep its own page number.",
+                        2)
+        );
+
+        List<DocumentProcessingService.PdfChunk> chunks =
+                service.splitPdfIntoChunks(paragraphs);
+
+        assertThat(chunks).isNotEmpty();
+        assertThat(chunks)
+                .allSatisfy(chunk ->
+                        assertThat(chunk.pageNumber())
+                                .isIn(1, 2));
+    }
+
 }
