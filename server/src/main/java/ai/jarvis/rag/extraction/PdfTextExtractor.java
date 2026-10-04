@@ -42,6 +42,7 @@ public class PdfTextExtractor implements TextExtractor {
             for (int page = 1; page <= document.getNumberOfPages(); page++) {
                 PDFTextStripper stripper = new PDFTextStripper();
 
+                stripper.setParagraphEnd("\n\n");
                 stripper.setStartPage(page);
                 stripper.setEndPage(page);
 
