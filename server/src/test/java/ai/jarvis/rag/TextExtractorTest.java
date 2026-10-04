@@ -4,7 +4,13 @@ import ai.jarvis.rag.extraction.MarkdownExtractor;
 import ai.jarvis.rag.extraction.PlainTextExtractor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
+import ai.jarvis.rag.extraction.PdfTextExtractor;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import java.io.ByteArrayOutputStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DisplayName("TextExtractor Tests")
@@ -14,6 +20,9 @@ class TextExtractorTest {
             new PlainTextExtractor();
     private final MarkdownExtractor markdownExtractor =
             new MarkdownExtractor();
+
+    private final PdfTextExtractor pdfExtractor =
+            new PdfTextExtractor();
 
     // ── PlainTextExtractor ────────────────────────
 
@@ -119,5 +128,103 @@ class TextExtractorTest {
         assertThat(markdownExtractor
                 .supports(DocumentFileType.TXT))
                 .isFalse();
+    }
+
+    @Test
+    @DisplayName("PDF: handles invalid input gracefully")
+    void pdfShouldHandleInvalidInput() {
+        assertThat(pdfExtractor.extract(new byte[]{1, 2, 3}))
+                .isEqualTo("");
+    }
+
+    @Test
+    @DisplayName("PDF: extracts text from valid PDF")
+    void pdfShouldExtractText() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+
+            try (PDPageContentStream contentStream =
+                         new PDPageContentStream(document, document.getPage(0))) {
+                contentStream.beginText();
+                contentStream.setFont(
+                        new PDType1Font(Standard14Fonts.FontName.HELVETICA),
+                        12);
+                contentStream.newLineAtOffset(50, 700);
+                contentStream.showText("Hello PDF");
+                contentStream.endText();
+            }
+
+            document.save(output);
+        }
+
+        String result = pdfExtractor.extract(output.toByteArray());
+
+        assertThat(result).contains("Hello PDF");
+    }
+    @Test
+    @DisplayName("PDF: supports PDF type")
+    void pdfShouldSupportPdf() {
+        assertThat(pdfExtractor.supports(DocumentFileType.PDF))
+                .isTrue();
+
+        assertThat(pdfExtractor.supports(DocumentFileType.TXT))
+                .isFalse();
+
+        assertThat(pdfExtractor.supports(DocumentFileType.MARKDOWN))
+                .isFalse();
+    }
+    @Test
+    @DisplayName("PDF: tracks page number for extracted paragraphs")
+    void pdfShouldTrackPageNumbers() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        try (PDDocument document = new PDDocument()) {
+
+            // Page 1
+            document.addPage(new PDPage());
+
+            try (PDPageContentStream contentStream =
+                         new PDPageContentStream(document, document.getPage(0))) {
+                contentStream.beginText();
+                contentStream.setFont(
+                        new PDType1Font(Standard14Fonts.FontName.HELVETICA),
+                        12);
+                contentStream.newLineAtOffset(50, 700);
+                contentStream.showText("This text belongs to page one.");
+                contentStream.endText();
+            }
+
+            // Page 2
+            document.addPage(new PDPage());
+
+            try (PDPageContentStream contentStream =
+                         new PDPageContentStream(document, document.getPage(1))) {
+                contentStream.beginText();
+                contentStream.setFont(
+                        new PDType1Font(Standard14Fonts.FontName.HELVETICA),
+                        12);
+                contentStream.newLineAtOffset(50, 700);
+                contentStream.showText("This text belongs to page two.");
+                contentStream.endText();
+            }
+
+            document.save(output);
+        }
+
+        var paragraphs = pdfExtractor.extractWithPages(output.toByteArray());
+
+        assertThat(paragraphs).hasSize(2);
+
+        assertThat(paragraphs.get(0).text())
+                .contains("page one");
+        assertThat(paragraphs.get(0).pageNumber())
+                .isEqualTo(1);
+
+        assertThat(paragraphs.get(1).text())
+                .contains("page two");
+        assertThat(paragraphs.get(1).pageNumber())
+                .isEqualTo(2);
     }
 }

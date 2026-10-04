@@ -12,8 +12,21 @@ import org.springframework.data.r2dbc.core
         .R2dbcEntityTemplate;
 
 import java.util.List;
-
+import ai.jarvis.rag.extraction.PdfTextExtractor;
 import static org.assertj.core.api.Assertions.assertThat;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.relational.core.query.Update;
+import reactor.core.publisher.Mono;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+import java.io.ByteArrayOutputStream;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("DocumentProcessingService Tests")
@@ -36,7 +49,8 @@ class DocumentProcessingServiceTest {
                 r2dbcEntityTemplate,
                 List.of(
                         new PlainTextExtractor(),
-                        new MarkdownExtractor()
+                        new MarkdownExtractor(),
+                        new PdfTextExtractor()
                 )
         );
     }
@@ -67,14 +81,12 @@ class DocumentProcessingServiceTest {
     }
 
     @Test
-    @DisplayName("extractText() falls back for PDF")
-    void shouldFallbackForPdf() {
-        // No PDF extractor registered
-        // Falls back to raw text
-        String result = service.extractText(
-                "raw pdf text",
-                DocumentFileType.PDF);
-        assertThat(result).isEqualTo("raw pdf text");
+    @DisplayName("extractText() uses PDF extractor for PDF")
+    void shouldUsePdfExtractorForPdf() {
+        PdfTextExtractor extractor = new PdfTextExtractor();
+
+        assertThat(extractor.supports(DocumentFileType.PDF))
+                .isTrue();
     }
 
     // ── splitIntoChunks() tests ───────────────────
@@ -154,5 +166,62 @@ class DocumentProcessingServiceTest {
                 .isEqualTo(0);
         assertThat(service.estimateTokens(null))
                 .isEqualTo(0);
+    }
+    @Test
+    @DisplayName("PdfTextExtractor extracts PDF content with page number")
+    void shouldExtractPdfContentWithPageNumber() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+
+            try (PDPageContentStream contentStream =
+                         new PDPageContentStream(document, document.getPage(0))) {
+                contentStream.beginText();
+                contentStream.setFont(
+                        new PDType1Font(Standard14Fonts.FontName.HELVETICA),
+                        12);
+                contentStream.newLineAtOffset(50, 700);
+                contentStream.showText(
+                        "This is PDF content for processing.");
+                contentStream.endText();
+            }
+
+            document.save(output);
+        }
+
+        PdfTextExtractor extractor = new PdfTextExtractor();
+
+        List<PdfTextExtractor.PdfParagraph> paragraphs =
+                extractor.extractWithPages(output.toByteArray());
+
+        assertThat(paragraphs).hasSize(1);
+        assertThat(paragraphs.get(0).text())
+                .contains("PDF content");
+        assertThat(paragraphs.get(0).pageNumber())
+                .isEqualTo(1);
+    }
+    @Test
+    @DisplayName("splitPdfIntoChunks() preserves page number")
+    void shouldPreservePdfPageNumber() {
+        List<PdfTextExtractor.PdfParagraph> paragraphs =
+                List.of(
+                        new PdfTextExtractor.PdfParagraph(
+                                "This is page one content with enough words " +
+                                        "to create a meaningful chunk for testing purposes.",
+                                1),
+                        new PdfTextExtractor.PdfParagraph(
+                                "This is page two content with enough words " +
+                                        "to create another meaningful chunk for testing purposes.",
+                                2)
+                );
+
+        List<DocumentProcessingService.PdfChunk> chunks =
+                service.splitPdfIntoChunks(paragraphs);
+
+        assertThat(chunks).isNotEmpty();
+
+        assertThat(chunks.get(0).pageNumber())
+                .isEqualTo(1);
     }
 }

@@ -6,7 +6,7 @@ import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
+import ai.jarvis.rag.extraction.PdfTextExtractor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -193,6 +193,74 @@ public class DocumentProcessingService {
                             );
                 });
     }
+    public Mono<Document> processPdfDocument(
+            UUID documentId,
+            UUID userId,
+            byte[] pdfContent) {
+
+        log.info(
+                "Processing PDF document: id={} bytes={}",
+                documentId,
+                pdfContent != null ? pdfContent.length : 0);
+
+        return documentRepository
+                .findByIdAndUserId(documentId, userId)
+                .switchIfEmpty(Mono.error(
+                        new RuntimeException(
+                                "Document not found: " + documentId)))
+                .flatMap(doc ->
+                        r2dbcEntityTemplate
+                                .update(doc.withProcessing()))
+                .flatMap(doc -> {
+                    try {
+                        PdfTextExtractor pdfExtractor =
+                                extractors.stream()
+                                        .filter(PdfTextExtractor.class::isInstance)
+                                        .map(PdfTextExtractor.class::cast)
+                                        .findFirst()
+                                        .orElseThrow(() ->
+                                                new IllegalStateException(
+                                                        "PDF extractor not configured"));
+
+                        List<PdfTextExtractor.PdfParagraph> paragraphs =
+                                pdfExtractor.extractWithPages(pdfContent);
+
+                        List<PdfChunk> chunks = splitPdfIntoChunks(paragraphs);
+
+                        return savePdfChunks(
+                                documentId,
+                                userId,
+                                chunks)
+                                .thenReturn(
+                                        new ChunkResult(
+                                                doc,
+                                                chunks.size()));
+                    } catch (Exception e) {
+                        log.error(
+                                "PDF extraction failed: id={} error={}",
+                                documentId,
+                                e.getMessage());
+                        return Mono.error(e);
+                    }
+                })
+                .flatMap(result ->
+                        r2dbcEntityTemplate
+                                .update(result.document()
+                                        .withReady(result.chunkCount())))
+                .onErrorResume(error -> {
+                    log.error(
+                            "PDF processing FAILED: id={} error={}",
+                            documentId,
+                            error.getMessage());
+
+                    return documentRepository
+                            .findByIdAndUserId(documentId, userId)
+                            .flatMap(doc ->
+                                    r2dbcEntityTemplate
+                                            .update(doc.withFailed(
+                                                    error.getMessage())));
+                });
+    }
 
     // ── Package-visible for testing ────────────────
 
@@ -342,6 +410,100 @@ public class DocumentProcessingService {
                 })
                 .then();
     }
+
+     List<PdfChunk> splitPdfIntoChunks(
+            List<PdfTextExtractor.PdfParagraph> paragraphs) {
+
+        if (paragraphs == null || paragraphs.isEmpty()) {
+            return List.of();
+        }
+
+        List<PdfChunk> chunks = new ArrayList<>();
+
+        int wordsPerChunk =
+                (int) (CHUNK_SIZE_TOKENS * 0.75);
+        int overlapWords =
+                (int) (CHUNK_OVERLAP_TOKENS * 0.75);
+
+        List<String> words = new ArrayList<>();
+        List<Integer> pageNumbers = new ArrayList<>();
+
+        for (PdfTextExtractor.PdfParagraph paragraph : paragraphs) {
+            String[] paragraphWords =
+                    paragraph.text().split("\\s+");
+
+            for (String word : paragraphWords) {
+                words.add(word);
+                pageNumbers.add(paragraph.pageNumber());
+            }
+        }
+
+        int start = 0;
+
+        while (start < words.size()) {
+            int end = Math.min(
+                    start + wordsPerChunk,
+                    words.size());
+
+            StringBuilder chunkText = new StringBuilder();
+
+            for (int i = start; i < end; i++) {
+                if (i > start) {
+                    chunkText.append(" ");
+                }
+                chunkText.append(words.get(i));
+            }
+
+            String content = chunkText.toString().trim();
+
+            if (content.split("\\s+").length >= 10) {
+                chunks.add(new PdfChunk(
+                        content,
+                        pageNumbers.get(start)));
+            }
+
+            start += wordsPerChunk - overlapWords;
+
+            if (wordsPerChunk <= overlapWords) {
+                break;
+            }
+        }
+
+        return chunks;
+    }
+
+    private Mono<Void> savePdfChunks(
+            UUID documentId,
+            UUID userId,
+            List<PdfChunk> chunks) {
+
+        return Flux.range(0, chunks.size())
+                .concatMap(index -> {
+                    PdfChunk pdfChunk = chunks.get(index);
+
+                    int tokens =
+                            estimateTokens(pdfChunk.content());
+
+                    DocumentChunk chunk =
+                            DocumentChunk.create(
+                                    documentId,
+                                    userId,
+                                    pdfChunk.content(),
+                                    index,
+                                    pdfChunk.pageNumber(),
+                                    tokens
+                            );
+
+                    return r2dbcEntityTemplate
+                            .insert(chunk)
+                            .then();
+                })
+                .then();
+    }
+
+     record PdfChunk(
+            String content,
+            int pageNumber) {}
 
     // ── Private Records ───────────────────────────
 

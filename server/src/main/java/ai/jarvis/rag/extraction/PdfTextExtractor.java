@@ -1,0 +1,93 @@
+package ai.jarvis.rag.extraction;
+
+import ai.jarvis.rag.DocumentFileType;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Component
+public class PdfTextExtractor implements TextExtractor {
+
+    /**
+     * PDF extraction requires binary PDF content.
+     *
+     * This method is not used for PDF processing because converting
+     * PDF bytes to String before extraction would corrupt the binary data.
+     */
+    @Override
+    public String extract(String rawText) {
+        return "";
+    }
+
+    /**
+     * Extracts text from a PDF while preserving the page number
+     * for each extracted paragraph.
+     *
+     * @param pdfContent PDF content as bytes
+     * @return extracted paragraphs with their page numbers
+     */
+    public List<PdfParagraph> extractWithPages(byte[] pdfContent) {
+        if (pdfContent == null || pdfContent.length == 0) {
+            return List.of();
+        }
+
+        try (PDDocument document = Loader.loadPDF(pdfContent)) {
+            List<PdfParagraph> paragraphs = new ArrayList<>();
+
+            for (int page = 1; page <= document.getNumberOfPages(); page++) {
+                PDFTextStripper stripper = new PDFTextStripper();
+
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+
+                String pageText = stripper.getText(document);
+
+                for (String paragraph : pageText.split("\\R\\s*\\R")) {
+                    String cleanParagraph = paragraph.trim();
+
+                    if (!cleanParagraph.isEmpty()) {
+                        paragraphs.add(
+                                new PdfParagraph(cleanParagraph, page)
+                        );
+                    }
+                }
+            }
+
+            return paragraphs;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Existing simple extraction API.
+     *
+     * @param pdfContent PDF content as bytes
+     * @return all extracted text
+     */
+    public String extract(byte[] pdfContent) {
+        return extractWithPages(pdfContent)
+                .stream()
+                .map(PdfParagraph::text)
+                .reduce((first, second) -> first + "\n\n" + second)
+                .orElse("");
+    }
+
+    @Override
+    public boolean supports(DocumentFileType fileType) {
+        return fileType == DocumentFileType.PDF;
+    }
+
+    /**
+     * A paragraph extracted from a PDF together with
+     * the page it came from.
+     */
+    public record PdfParagraph(
+            String text,
+            int pageNumber
+    ) {}
+}
