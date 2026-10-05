@@ -227,28 +227,42 @@ class DocumentProcessingServiceTest {
         assertThat(chunks.get(0).pageNumber())
                 .isEqualTo(1);
     }
-    @Test
-    @DisplayName("splitPdfIntoChunks() does not mix page numbers in one chunk")
-    void shouldKeepPdfChunksWithinPageBoundaries() {
-        List<PdfTextExtractor.PdfParagraph> paragraphs = List.of(
-                new PdfTextExtractor.PdfParagraph(
-                        "Page one has a lot of content that should stay together " +
-                                "without being mixed with the next page content.",
-                        1),
-                new PdfTextExtractor.PdfParagraph(
-                        "Page two also has enough content to create its own chunk " +
-                                "and should keep its own page number.",
-                        2)
-        );
+        @Test
+        @DisplayName("splitPdfIntoChunks() does not mix page numbers in one chunk")
+        void shouldKeepPdfChunksWithinPageBoundaries() {
+            List<PdfTextExtractor.PdfParagraph> paragraphs = List.of(
+                    new PdfTextExtractor.PdfParagraph(
+                            "Page one has a lot of content that should stay together " +
+                                    "without being mixed with the next page content.",
+                            1),
+                    new PdfTextExtractor.PdfParagraph(
+                            "Page two also has enough content to create its own chunk " +
+                                    "and should keep its own page number.",
+                            2)
+            );
 
-        List<DocumentProcessingService.PdfChunk> chunks =
-                service.splitPdfIntoChunks(paragraphs);
+            List<DocumentProcessingService.PdfChunk> chunks =
+                    service.splitPdfIntoChunks(paragraphs);
 
-        assertThat(chunks).isNotEmpty();
-        assertThat(chunks)
-                .allSatisfy(chunk ->
-                        assertThat(chunk.pageNumber())
-                                .isIn(1, 2));
+            assertThat(chunks).isNotEmpty();
+            assertThat(chunks)
+                    .allSatisfy(chunk ->
+                            assertThat(chunk.pageNumber())
+                                    .isIn(1, 2));
+
+            // Verify page number is correctly associated with its content
+            assertThat(chunks)
+                    .anySatisfy(chunk -> {
+                        assertThat(chunk.pageNumber()).isEqualTo(1);
+                        assertThat(chunk.content()).contains("Page one");
+                        assertThat(chunk.content()).doesNotContain("Page two");
+                    });
+
+            assertThat(chunks)
+                    .anySatisfy(chunk -> {
+                        assertThat(chunk.pageNumber()).isEqualTo(2);
+                        assertThat(chunk.content()).contains("Page two");
+                        assertThat(chunk.content()).doesNotContain("Page one");
+                    });
+        }
     }
-
-}
