@@ -489,9 +489,16 @@ public class DocumentProcessingService {
                         pageNumbers.get(start)));
             }
 
-            start += wordsPerChunk - overlapWords;
-
-            if (wordsPerChunk <= overlapWords) {
+            if (end < words.size()) {
+                if (end < start + wordsPerChunk) {
+                    // A page boundary ended this chunk.
+                    // Start from the next word so no content is skipped.
+                    start = end;
+                } else {
+                    // Normal chunk boundary: keep the configured overlap.
+                    start = end - overlapWords;
+                }
+            } else {
                 break;
             }
         }
