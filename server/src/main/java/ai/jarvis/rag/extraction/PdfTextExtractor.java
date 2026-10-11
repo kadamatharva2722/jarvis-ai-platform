@@ -5,7 +5,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Component;
-
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,10 +39,10 @@ public class PdfTextExtractor implements TextExtractor {
         try (PDDocument document = Loader.loadPDF(pdfContent)) {
             List<PdfParagraph> paragraphs = new ArrayList<>();
 
-            for (int page = 1; page <= document.getNumberOfPages(); page++) {
-                PDFTextStripper stripper = new PDFTextStripper();
+            PDFTextStripper stripper = new PDFTextStripper();
 
-                stripper.setParagraphEnd("\n\n");
+            for (int page = 1; page <= document.getNumberOfPages(); page++) {
+
                 stripper.setStartPage(page);
                 stripper.setEndPage(page);
 
@@ -60,7 +60,7 @@ public class PdfTextExtractor implements TextExtractor {
             }
 
             return paragraphs;
-        } catch (Exception e) {
+        } catch (IOException e) {
             throw new IllegalArgumentException(
                     "Failed to extract text from PDF", e);
         }

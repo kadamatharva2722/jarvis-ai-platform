@@ -117,6 +117,11 @@ public class DocumentProcessingService {
             String rawText,
             DocumentFileType fileType) {
 
+        if (fileType == DocumentFileType.PDF) {
+            return Mono.error(new IllegalArgumentException(
+                    "PDF files must be processed using processPdfDocument()"));
+        }
+
         log.info(
                 "Processing document: id={} type={} chars={}",
                 documentId,
@@ -214,16 +219,17 @@ public class DocumentProcessingService {
                 // Step 2: Extract PDF text and create chunks
                 .flatMap(doc -> {
                     try {
-                        PdfTextExtractor pdfExtractor =
-                                extractors.stream()
-                                        .filter(
-                                                PdfTextExtractor.class::isInstance)
-                                        .map(
-                                                PdfTextExtractor.class::cast)
-                                        .findFirst()
-                                        .orElseThrow(() ->
-                                                new IllegalStateException(
-                                                        "PDF extractor not configured"));
+                        TextExtractor extractor = extractors.stream()
+                                .filter(e -> e.supports(DocumentFileType.PDF))
+                                .findFirst()
+                                .orElseThrow(() ->
+                                        new IllegalStateException(
+                                                "PDF extractor not configured"));
+
+                        if (!(extractor instanceof PdfTextExtractor pdfExtractor)) {
+                            throw new IllegalStateException(
+                                    "PDF extractor does not support page tracking");
+                        }
 
                         return Mono.fromCallable(() -> {
                                     List<PdfTextExtractor.PdfParagraph> paragraphs =

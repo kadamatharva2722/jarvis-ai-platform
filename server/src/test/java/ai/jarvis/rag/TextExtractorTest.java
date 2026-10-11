@@ -183,7 +183,7 @@ class TextExtractorTest {
 
                 contentStream.newLineAtOffset(50, 700);
                 contentStream.showText("First paragraph of the document.");
-                contentStream.newLineAtOffset(0, -30);
+                contentStream.newLineAtOffset(0, -60);
                 contentStream.showText("Second paragraph of the document.");
 
                 contentStream.endText();

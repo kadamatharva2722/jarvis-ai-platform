@@ -10,7 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.r2dbc.core
         .R2dbcEntityTemplate;
-
+import java.io.IOException;
 import java.util.List;
 import ai.jarvis.rag.extraction.PdfTextExtractor;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,13 +20,19 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.mockito.ArgumentCaptor;
+import static org.mockito.ArgumentMatchers.any;
 import org.springframework.data.relational.core.query.Update;
 import reactor.core.publisher.Mono;
 import org.springframework.transaction.reactive.TransactionalOperator;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import java.io.ByteArrayOutputStream;
+import ai.jarvis.rag.DocumentStatus;
+import java.util.UUID;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.any;
+import java.util.UUID;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("DocumentProcessingService Tests")
@@ -265,4 +271,114 @@ class DocumentProcessingServiceTest {
                         assertThat(chunk.content()).doesNotContain("Page one");
                     });
         }
+
+    @Test
+    void processPdfDocument_shouldMarkDocumentReady_whenProcessingSucceeds() throws IOException {
+        UUID userId = UUID.randomUUID();
+
+        Document document = Document.create(
+                userId,
+                "test.pdf",
+                DocumentFileType.PDF,
+                1024L,
+                "PDF pipeline test"
+        );
+
+        UUID documentId = document.id();
+
+        // 1. Mock document lookup
+        when(documentRepository.findByIdAndUserId(documentId, userId))
+                .thenReturn(Mono.just(document));
+
+        // 2. ADD THIS BLOCK HERE
+        when(r2dbcEntityTemplate.update(any(Document.class)))
+                .thenAnswer(invocation ->
+                        Mono.just(invocation.getArgument(0)));
+
+        when(transactionalOperator.transactional(any(Mono.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        when(r2dbcEntityTemplate.insert(any(DocumentChunk.class)))
+                .thenAnswer(invocation ->
+                        Mono.just(invocation.getArgument(0)));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        try (PDDocument pdf = new PDDocument()) {
+            PDPage page = new PDPage();
+            pdf.addPage(page);
+
+            try (PDPageContentStream content = new PDPageContentStream(pdf, page)) {
+                content.beginText();
+                content.setFont(
+                        new PDType1Font(Standard14Fonts.FontName.HELVETICA),
+                        12
+                );
+                content.newLineAtOffset(50, 700);
+                content.showText("This is a PDF pipeline test.");
+                content.endText();
+            }
+
+            pdf.save(output);
+        }
+
+        byte[] pdfContent = output.toByteArray();
+
+        Document result = service.processPdfDocument(
+                documentId, userId, pdfContent
+        ).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.status()).isEqualTo(DocumentStatus.READY);
+
+        ArgumentCaptor<Document> documentCaptor =
+                ArgumentCaptor.forClass(Document.class);
+
+        verify(r2dbcEntityTemplate, org.mockito.Mockito.times(2))
+                .update(documentCaptor.capture());
+
+        List<Document> updatedDocuments = documentCaptor.getAllValues();
+
+        assertThat(updatedDocuments.get(0).status())
+                .isEqualTo(DocumentStatus.PROCESSING);
+
+        assertThat(updatedDocuments.get(1).status())
+                .isEqualTo(DocumentStatus.READY);
     }
+
+    @Test
+    void processPdfDocument_shouldMarkDocumentFailed_whenPdfIsInvalid() {
+        UUID userId = UUID.randomUUID();
+
+        Document document = Document.create(
+                userId,
+                "invalid.pdf",
+                DocumentFileType.PDF,
+                100L,
+                "Invalid PDF test"
+        );
+
+        UUID documentId = document.id();
+
+        when(documentRepository.findByIdAndUserId(documentId, userId))
+                .thenReturn(Mono.just(document));
+
+        when(r2dbcEntityTemplate.update(any(Document.class)))
+                .thenAnswer(invocation ->
+                        Mono.just(invocation.getArgument(0)));
+
+        byte[] invalidPdfContent = "not a valid PDF".getBytes(
+                java.nio.charset.StandardCharsets.UTF_8
+        );
+
+        Document result = service.processPdfDocument(
+                documentId,
+                userId,
+                invalidPdfContent
+        ).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.status()).isEqualTo(DocumentStatus.FAILED);
+        assertThat(result.errorMessage()).isNotBlank();
+    }
+}
