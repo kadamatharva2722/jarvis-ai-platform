@@ -31,8 +31,7 @@ import ai.jarvis.rag.DocumentStatus;
 import java.util.UUID;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.any;
-import java.util.UUID;
-import static org.mockito.Mockito.when;
+
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("DocumentProcessingService Tests")
@@ -89,14 +88,16 @@ class DocumentProcessingServiceTest {
                 .doesNotContain("**");
     }
 
+
     @Test
-    @DisplayName("extractText() uses PDF extractor for PDF")
-    void shouldUsePdfExtractorForPdf() {
+    @DisplayName("supports() returns true for PDF file type")
+    void shouldSupportPdfFileType() {
         PdfTextExtractor extractor = new PdfTextExtractor();
 
         assertThat(extractor.supports(DocumentFileType.PDF))
                 .isTrue();
     }
+
 
     // ── splitIntoChunks() tests ───────────────────
 
